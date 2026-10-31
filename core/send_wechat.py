@@ -1,33 +1,18 @@
 """
-把 daily_brief.md 解析成结构化数据，生成精致的 HTML 卡片邮件发出去
-
-【本轮改动】
-1. 各榜单头名从8段（含"普通人获得"）精简成7段（来源/标题/链接/发生了什么/处理情况/原理科普/对你的意义）
-2. 科技资讯/经济/政治/科学突破的内容卡片从7段精简成5段（标题/链接/标签/摘要/一句话点评），
-   原来的"为什么重要/可能影响/后续关注点"三段合并成"一句话点评"一段，减少模板化重复感
-3. 行动建议板块渲染逻辑不变
-4. 结束语挪进底部"今日最该做的一件事"的蓝色框里，更醒目
-5. 内容卡片改为六段式（来源/标题/链接/标签/摘要/一句话点评），卡片顶部新增来源徽标
-6. 当天早晚去重：早上发完邮件后，把当天看过的新闻（标题+链接）记到 D 盘，晚上自动避开
+把 daily_brief.md 解析成结构化数据，生成精致的 HTML 卡片推送出去
+（已修改为通过 PushPlus 推送到微信）
 """
 import os
 import re
 import html as html_lib
 import urllib.parse
-import smtplib
+import requests
 import time
-from email.mime.text import MIMEText
-from email.header import Header
 
 import seen_records
 
-# 邮箱账号/授权码/收件人：从环境变量读取（GitHub Secrets 里配置）
-QQ_EMAIL = os.environ.get("QQ_EMAIL", "")
-QQ_AUTH_CODE = os.environ.get("QQ_AUTH_CODE", "")
-SEND_TO = os.environ.get("SEND_TO", QQ_EMAIL)
-
-SMTP_SERVER = "smtp.qq.com"
-SMTP_PORT = 587
+# 从环境变量读取 PushPlus 的 Token
+PUSHPLUS_TOKEN = os.environ.get("PUSHPLUS_TOKEN", "")
 
 COLOR_DARK = "#2c3e50"
 COLOR_ACCENT = "#3f6b8f"
@@ -55,10 +40,8 @@ def _split_line(line, min_parts):
 
 
 def _safe_href(url):
-    """将原始 URL 安全地放入 HTML href 属性，避免邮箱客户端截断链接。"""
+    """将原始 URL 安全地放入 HTML href 属性，避免客户端截断链接。"""
     url = (url or "").strip().strip("<>\"'")
-    # AI 偶尔会把“|||说明文字”一起放进链接，并被编码成 %7C%7C。
-    # 解码后截断，避免邮件客户端把说明文字也当成 URL。
     decoded = urllib.parse.unquote(url)
     if "|||" in decoded:
         url = decoded.split("|||", 1)[0].strip()
@@ -83,7 +66,7 @@ def parse_brief(content):
     return date, slot, sections
 
 def collect_seen_items(sections):
-    """把邮件里实际展示的新闻（标题+链接）收集起来，供当天晚上去重用"""
+    """把展示的新闻（标题+链接）收集起来，供当天晚上去重用"""
     seen = []
     seen_urls = set()
     for key in ("jwc", "top_picks", "tech", "economy", "politics", "science"):
@@ -91,7 +74,6 @@ def collect_seen_items(sections):
             parts = _split_line(raw_line, 3)
             if not parts:
                 continue
-            # jwc 是"标题|||链接|||说明"，其余卡片是"来源|||标题|||链接|||..."
             title, url = (parts[0], parts[1]) if key == "jwc" else (parts[1], parts[2])
             if title and url and url not in seen_urls:
                 seen_urls.add(url)
@@ -99,36 +81,20 @@ def collect_seen_items(sections):
     return seen
 
 
-
-
-
 def render_overview(text):
     one_liner, ai_view, trend, todo = "", "", "", ""
     mode = None
     for line in text.split("\n"):
         line = line.strip()
-        if not line:
-            continue
-        if "今日一句话" in line:
-            mode = "one_liner"
-            continue
-        if "AI观察" in line:
-            mode = "ai_view"
-            continue
-        if "趋势预测" in line:
-            mode = "trend"
-            continue
-        if "最该做的" in line:
-            mode = "todo"
-            continue
-        if mode == "one_liner":
-            one_liner += line
-        elif mode == "ai_view":
-            ai_view += line + " "
-        elif mode == "trend":
-            trend += line + " "
-        elif mode == "todo":
-            todo += line
+        if not line: continue
+        if "今日一句话" in line: mode = "one_liner"; continue
+        if "AI观察" in line: mode = "ai_view"; continue
+        if "趋势预测" in line: mode = "trend"; continue
+        if "最该做的" in line: mode = "todo"; continue
+        if mode == "one_liner": one_liner += line
+        elif mode == "ai_view": ai_view += line + " "
+        elif mode == "trend": trend += line + " "
+        elif mode == "todo": todo += line
 
     trend_html = f'''<div style="font-size:15px; color:#cfd8e3; line-height:1.7; margin-top:12px; border-top:1px solid rgba(255,255,255,0.2); padding-top:12px;">🔮 {trend}</div>''' if trend else ""
 
@@ -145,8 +111,7 @@ def render_jwc_cards(text):
     mode = None
     for raw_line in text.split("\n"):
         line = raw_line.strip()
-        if not line:
-            continue
+        if not line: continue
         if "需要行动" in line:
             mode = "action"
             html += f'<div style="font-size:15px; color:{COLOR_ACCENT}; font-weight:bold; margin:16px 0 10px;">● 需要行动</div>'
@@ -156,11 +121,9 @@ def render_jwc_cards(text):
             html += f'<div style="font-size:15px; color:{COLOR_MUTED}; font-weight:bold; margin:16px 0 10px;">○ 仅需了解</div>'
             continue
         parts = _split_line(line, 3)
-        if not parts:
-            continue
+        if not parts: continue
         title, url, desc = parts[0], parts[1], parts[2]
-        if not title:
-            continue
+        if not title: continue
         title_html = f'<a href="{_safe_href(url)}" style="color:inherit; text-decoration:none; border-bottom:1px dotted currentColor;">{html_lib.escape(title)}</a>' if url else html_lib.escape(title)
         if mode == "action":
             html += f'''<div style="background:{COLOR_BG_ACCENT}; border-left:3px solid {COLOR_ACCENT}; border-radius:4px; padding:14px 18px; margin-bottom:10px;">
@@ -176,18 +139,14 @@ def render_jwc_cards(text):
 
 
 def render_top_picks(text):
-    """七段式：来源|||标题|||链接|||发生了什么|||处理情况|||原理科普|||对你的意义"""
     html = ""
     for raw_line in text.split("\n"):
         line = raw_line.strip()
-        if not line:
-            continue
+        if not line: continue
         parts = _split_line(line, 7)
-        if not parts:
-            continue
+        if not parts: continue
         label, title, url, happened, progress, principle, meaning = parts[:7]
-        if not title:
-            continue
+        if not title: continue
         title_html = f'<a href="{_safe_href(url)}" style="color:#222; text-decoration:none; border-bottom:1px dotted #222;">{html_lib.escape(title)}</a>' if url else html_lib.escape(title)
         html += f'''<div style="background:#fff; border:1px solid {COLOR_ACCENT}; border-radius:6px; padding:18px 20px; margin-bottom:14px;">
             <div style="display:inline-block; background:{COLOR_ACCENT}; color:#fff; font-size:12px; padding:3px 10px; border-radius:10px; margin-bottom:8px;">{label}</div>
@@ -201,22 +160,18 @@ def render_top_picks(text):
 
 
 def render_content_cards(text):
-    """六段式：来源|||标题|||链接|||标签|||深度摘要|||一句话点评"""
     html = ""
     for raw_line in text.split("\n"):
         line = raw_line.strip()
-        if not line:
-            continue
+        if not line: continue
         parts = _split_line(line, 5)
-        if not parts:
-            continue
+        if not parts: continue
         if len(parts) >= 6:
             source, title, url, tags, digest, comment = parts[:6]
         else:
             source = ""
             title, url, tags, digest, comment = parts[:5]
-        if not title:
-            continue
+        if not title: continue
         title_html = f'<a href="{_safe_href(url)}" style="color:#222; text-decoration:none; border-bottom:1px dotted #222;">{html_lib.escape(title)}</a>' if url else html_lib.escape(title)
         tag_badges = "".join([
             f'<span style="display:inline-block; background:{COLOR_BG_ACCENT}; color:{COLOR_ACCENT}; font-size:12px; padding:3px 8px; border-radius:8px; margin-right:5px;">{t.strip()}</span>'
@@ -237,28 +192,17 @@ def render_action_advice(text):
     mode = None
     for raw_line in text.split("\n"):
         line = raw_line.strip()
-        if not line:
-            continue
-        if "可能的方向" in line:
-            mode = "directions"
-            continue
-        if "不建议投入" in line:
-            mode = "not_worth"
-            continue
-        if "今日推荐行动" in line:
-            mode = "recommend"
-            continue
+        if not line: continue
+        if "可能的方向" in line: mode = "directions"; continue
+        if "不建议投入" in line: mode = "not_worth"; continue
+        if "今日推荐行动" in line: mode = "recommend"; continue
         if mode == "directions":
             parts = _split_line(line, 2)
-            if parts and parts[0]:
-                directions.append((parts[0], parts[1]))
-        elif mode == "not_worth":
-            not_worth += line
-        elif mode == "recommend":
-            recommend += line
+            if parts and parts[0]: directions.append((parts[0], parts[1]))
+        elif mode == "not_worth": not_worth += line
+        elif mode == "recommend": recommend += line
 
-    if not directions and not not_worth and not recommend:
-        return ""
+    if not directions and not not_worth and not recommend: return ""
 
     directions_html = "".join([
         f'''<div style="padding:10px 0; border-bottom:1px solid rgba(255,255,255,0.15);">
@@ -287,23 +231,15 @@ def render_action_advice(text):
 
 
 def render_greeting(text):
-    """解析AI生成的开头问候+结尾道别"""
     opening, closing = "", ""
     mode = None
     for line in text.split("\n"):
         line = line.strip()
-        if not line:
-            continue
-        if "开头" in line and line.startswith("【"):
-            mode = "opening"
-            continue
-        if "结尾" in line and line.startswith("【"):
-            mode = "closing"
-            continue
-        if mode == "opening":
-            opening += line
-        elif mode == "closing":
-            closing += line
+        if not line: continue
+        if "开头" in line and line.startswith("【"): mode = "opening"; continue
+        if "结尾" in line and line.startswith("【"): mode = "closing"; continue
+        if mode == "opening": opening += line
+        elif mode == "closing": closing += line
     return opening, closing
 
 
@@ -317,10 +253,7 @@ def build_html(date, slot, sections):
     for key, title in EXTRA_SECTIONS:
         content = render_content_cards(sections.get(key, ""))
         if content:
-            extra_sections_html += f'''
-            <h2 style="font-size:18px; color:{COLOR_DARK}; margin-top:26px;">{title}</h2>
-            {content}
-            '''
+            extra_sections_html += f'''<h2 style="font-size:18px; color:{COLOR_DARK}; margin-top:26px;">{title}</h2>{content}'''
 
     action_html = render_action_advice(sections.get("action", ""))
     opening, closing = render_greeting(sections.get("greeting", ""))
@@ -346,32 +279,28 @@ def build_html(date, slot, sections):
     <div style="max-width:620px; margin:0 auto; font-family:-apple-system,'PingFang SC',sans-serif;">
         <h1 style="font-size:23px; color:{COLOR_DARK}; margin-bottom:6px;">📋 每日简报</h1>
         <div style="font-size:15px; color:{COLOR_MUTED}; margin-bottom:18px;">{date}</div>
-
         {opening_html}
-
         {overview_html}
-
         {tab_bar}
-
         <h2 style="font-size:18px; color:{COLOR_DARK}; margin-top:8px;">学校教务</h2>
         {jwc_html}
-
         <h2 style="font-size:18px; color:{COLOR_DARK}; margin-top:26px;">🏆 各榜单头名</h2>
         {top_picks_html}
-
         <h2 style="font-size:18px; color:{COLOR_DARK}; margin-top:26px;">科技资讯全览</h2>
         {tech_html}
-
         {extra_sections_html}
-
         {action_html}
-
         {footer}
     </div>
     """
 
 
-def send_brief_email():
+def send_brief_wechat():
+    """已修改：使用 PushPlus 发送到微信"""
+    if not PUSHPLUS_TOKEN:
+        print("❌ 错误: 未找到 PUSHPLUS_TOKEN 环境变量，请检查 GitHub Secrets")
+        return
+
     try:
         with open("daily_brief.md", "r", encoding="utf-8") as f:
             content = f.read()
@@ -383,35 +312,44 @@ def send_brief_email():
     html_content = build_html(date, slot, sections)
 
     slot_tag = "早报" if slot == "morning" else "晚报"
-    msg = MIMEText(html_content, "html", "utf-8")
-    msg["From"] = QQ_EMAIL
-    msg["To"] = SEND_TO
-    msg["Subject"] = Header(f"每日简报·{slot_tag} {date}", "utf-8")
+    title = f"每日简报·{slot_tag} {date}"
+
+    url = "https://www.pushplus.plus/send"
+    payload = {
+        "token": PUSHPLUS_TOKEN,
+        "title": title,
+        "content": html_content,
+        "template": "html" # 使用 HTML 模板保留精美排版
+    }
 
     max_retries = 3
     last_error = None
     for attempt in range(1, max_retries + 1):
         try:
-            server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=30)
-            server.ehlo()
-            server.starttls()
-            server.ehlo()
-            server.login(QQ_EMAIL, QQ_AUTH_CODE)
-            server.sendmail(QQ_EMAIL, [SEND_TO], msg.as_string())
-            server.quit()
-            print(f"✅ 简报已发送到 {SEND_TO}（第{attempt}次尝试成功）")
-            if slot == "morning":
-                seen_items = collect_seen_items(sections)
-                seen_records.record_today(date, seen_items)
-            return
+            print(f"📡 正在通过 PushPlus 推送到微信 (第{attempt}次尝试)...")
+            res = requests.post(url, json=payload, timeout=15)
+            
+            # PushPlus 成功返回 200 且包含 "code":200
+            if res.status_code == 200 and '"code":200' in res.text:
+                print(f"✅ 简报已成功推送到微信！")
+                # 早报发送成功后，记录已看新闻，供晚报去重
+                if slot == "morning":
+                    seen_items = collect_seen_items(sections)
+                    seen_records.record_today(date, seen_items)
+                return
+            else:
+                last_error = res.text
+                print(f"⚠️ 第{attempt}次推送失败：{res.text}")
         except Exception as e:
-            last_error = e
-            print(f"⚠️ 第{attempt}次发送失败：{e}")
-            if attempt < max_retries:
-                time.sleep(5)
+            last_error = str(e)
+            print(f"⚠️ 第{attempt}次请求异常：{e}")
+        
+        if attempt < max_retries:
+            time.sleep(5)
 
-    print(f"❌ 发送失败（已重试{max_retries}次）：{last_error}")
+    print(f"❌ 推送彻底失败（已重试{max_retries}次）：{last_error}")
 
 
 if __name__ == "__main__":
-    send_brief_email()
+    # 兼容原来的函数名，以防其他地方调用了它
+    send_brief_wechat()
