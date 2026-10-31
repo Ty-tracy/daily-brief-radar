@@ -2,11 +2,9 @@ name: 每日AI简报
 
 on:
   schedule:
-    # 注意：GitHub Actions 的 cron 是 UTC 时间，北京时间 = UTC + 8
-    # 这里设置：北京时间早上 7:30 (UTC 23:30 前一天) 和 晚上 21:00 (UTC 13:00)
-    - cron: '30 23 * * *'   # 北京时间 07:30 早班
-    - cron: '0 13 * * *'    # 北京时间 21:00 晚班
-  workflow_dispatch:        # 允许你在 GitHub 网页上手动点按钮触发，方便测试
+    - cron: '30 23 * * *'
+    - cron: '0 13 * * *'
+  workflow_dispatch:
 
 jobs:
   run-brief:
@@ -55,11 +53,13 @@ jobs:
           echo "当前 UTC 时间：${HOUR_UTC}:${MIN_UTC}，距早班 ${ABS_MORNING} 分钟，距晚班 ${ABS_EVENING} 分钟"
 
           if [ "$ABS_MORNING" -le "$ABS_EVENING" ]; then
-            echo "判定为：早班（morning）"
-            # 👇 加了 -u，强制实时输出日志
+            echo "========== 开始运行早班（morning） =========="
             python -u run_all.py morning
           else
-            echo "判定为：晚班（evening）"
-            # 👇 加了 -u，强制实时输出日志
+            echo "========== 开始运行晚班（evening） =========="
             python -u run_all.py evening
           fi
+
+          echo "========== 🔍 检查文件到底生成在哪里了 =========="
+          # 在当前目录及所有子目录中寻找 daily_brief.md
+          find . -name "daily_brief.md"
