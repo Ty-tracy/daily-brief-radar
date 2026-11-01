@@ -1,5 +1,5 @@
 """
-一键运行：依次执行抓取 → AI摘要 → 发送简报微信
+一键运行：依次执行抓取 → AI摘要 → 发送简报微信（定制瘦身版）
 """
 import subprocess
 import sys
@@ -8,14 +8,12 @@ import time
 from datetime import datetime
 
 MAX_RETRIES = 3
-RETRY_WAIT_SECONDS = 5 # 测试期间缩短重试等待时间
+RETRY_WAIT_SECONDS = 5
 
-# 👇 已经删掉了“抓取教务网通知”，如果你以后想加别的，可以在这里加
+# 👇 只保留我们需要的两个抓取步骤
 FETCH_STEPS = [
-    ("抓取 GitHub Trending", "fetchers/fetch_github_trending.py"),
-    ("抓取 Hacker News", "fetchers/fetch_hacker_news.py"),
-    ("抓取科技/AI媒体RSS", "fetchers/fetch_rss_sources.py"),
-    ("抓取经济/政治/科学突破新闻", "fetchers/fetch_category_news.py"),
+    ("抓取定制RSS源", "fetchers/fetch_rss_sources.py"),
+    ("抓取分类关键词新闻", "fetchers/fetch_category_news.py"),
 ]
 
 if len(sys.argv) > 1 and sys.argv[1] in ("morning", "evening"):
@@ -40,7 +38,6 @@ def run_step_with_retry(step_name, script, extra_args):
     for attempt in range(1, MAX_RETRIES + 1):
         print(f"\n{'='*40}")
         print(f"▶ 正在执行：{step_name}（第{attempt}次尝试）")
-        print(f"执行命令：{sys.executable} {script} {' '.join(extra_args)}")
         print('='*40)
         
         result = subprocess.run(
