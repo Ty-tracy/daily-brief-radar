@@ -1,45 +1,28 @@
 """
-抓取多个RSS信息源（宏观政策 / 经济数据 / 发改动态 / 前沿科技）
-用 feedparser 这个专门解析RSS的工具库，比自己写XML解析省事很多
-
-运行前需要先装：pip install feedparser
+抓取指定信息源（使用 Google News 聚合，解决国内网站屏蔽海外 IP 的问题）
 """
 import feedparser
 from datetime import datetime
 import json
+import urllib.parse
 
-# 信息源清单：名字 + RSS地址
+# 这里我们不再直连国内网站，而是让 Google 帮我们去抓取
 RSS_SOURCES = {
-    # ==========================================
-    # 核心宏观与政策（原生稳定源）
-    # ==========================================
-    "国家统计局": "http://www.stats.gov.cn/tjsj/zxfb/rss.xml",
-    "财新网-要闻": "https://gateway.caixin.com/api/data/global/feedlyRss.xml",
-    
-    # ==========================================
-    # 发改与专项债（Google News 聚合，防止官网反爬失效）
-    # ==========================================
-    "发改委最新政策": "https://news.google.com/rss/search?q=site:ndrc.gov.cn+when:7d&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
-    "专项债与国债动态": "https://news.google.com/rss/search?q=专项债+OR+超长期特别国债+when:7d&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
-    
-    # ==========================================
-    # 科技前沿与产业（AI4S / 低空 / 北斗）
-    # ==========================================
-    "前沿科技风向": "https://news.google.com/rss/search?q=AI4S+OR+低空经济+OR+北斗+when:7d&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
-    
-    # ==========================================
-    # 补充一点商业科技视点
-    # ==========================================
-    "36氪": "https://36kr.com/feed",
+    "发改委最新政策": "site:ndrc.gov.cn",
+    "专项债与国债动态": "专项债 OR 超长期特别国债",
+    "AI4S与低空经济": "AI4S OR 低空经济 OR 北斗",
+    "宏观财经": "宏观经济 OR 财新网",
 }
 
-def fetch_rss(name, url, max_items=8):
-    """抓取单个RSS源，返回最新几条"""
+def fetch_rss(name, query, max_items=5):
+    # 核心修复：对中文关键词进行 URL 编码
+    encoded_query = urllib.parse.quote(f"{query} when:7d")
+    url = f"https://news.google.com/rss/search?q={encoded_query}&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"
+    
     feed = feedparser.parse(url)
 
     if feed.bozo and not feed.entries:
-        # bozo=1 通常表示解析出了点问题，如果还完全没抓到内容，说明这个源可能失效了
-        print(f"⚠️ {name} 抓取可能有问题，跳过（{url}）")
+        print(f"⚠️ {name} 抓取可能有问题，跳过")
         return []
 
     results = []
@@ -52,21 +35,15 @@ def fetch_rss(name, url, max_items=8):
         })
     return results
 
-
 if __name__ == "__main__":
     all_items = []
-
-    for name, url in RSS_SOURCES.items():
+    for name, query in RSS_SOURCES.items():
         print(f"正在抓取 {name} ...")
-        items = fetch_rss(name, url)
+        items = fetch_rss(name, query)
         print(f"  → 抓到 {len(items)} 条")
         all_items.extend(items)
 
     print(f"\n总共抓取到 {len(all_items)} 条")
-    for i, item in enumerate(all_items, 1):
-        print(f"{i}. [{item['source']}] {item['title']}")
-        print(f"   {item['url']}\n")
-
     output = {
         "fetched_at": datetime.now().isoformat(),
         "source": "rss_mixed",
@@ -74,5 +51,4 @@ if __name__ == "__main__":
     }
     with open("rss_sources.json", "w", encoding="utf-8") as f:
         json.dump(output, f, ensure_ascii=False, indent=2)
-
-    print(f"已保存到 rss_sources.json（共 {len(all_items)} 条）")
+    print(f"已保存到 rss_sources.json")
