@@ -1,21 +1,21 @@
 """
-抓取指定信息源（使用 Google News 聚合，解决国内网站屏蔽海外 IP 的问题）
+抓取指定信息源（大容量版）
 """
 import feedparser
 from datetime import datetime
 import json
 import urllib.parse
 
-# 这里我们不再直连国内网站，而是让 Google 帮我们去抓取
 RSS_SOURCES = {
-    "发改委最新政策": "site:ndrc.gov.cn",
-    "专项债与国债动态": "专项债 OR 超长期特别国债",
-    "AI4S与低空经济": "AI4S OR 低空经济 OR 北斗",
-    "宏观财经": "宏观经济 OR 财新网",
+    "发改委与国务院": "site:ndrc.gov.cn OR site:gov.cn 政策 OR 资金",
+    "财政与专项债": "专项债 OR 超长期特别国债 OR 中央预算内投资",
+    "宏观经济数据": "国家统计局 OR 宏观经济数据 OR CPI OR PPI",
+    "新质生产力": "新质生产力 OR 低空经济 OR 算力网 OR 卫星互联网",
+    "AI与前沿科技": "AI4S OR 大模型 OR 人工智能应用",
+    "地方经济动态": "湖北经济 OR 宜昌经济 OR 地方专项债",
 }
 
-def fetch_rss(name, query, max_items=5):
-    # 核心修复：对中文关键词进行 URL 编码
+def fetch_rss(name, query, max_items=10):  # 增加每次抓取的数量
     encoded_query = urllib.parse.quote(f"{query} when:7d")
     url = f"https://news.google.com/rss/search?q={encoded_query}&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"
     
@@ -44,11 +44,5 @@ if __name__ == "__main__":
         all_items.extend(items)
 
     print(f"\n总共抓取到 {len(all_items)} 条")
-    output = {
-        "fetched_at": datetime.now().isoformat(),
-        "source": "rss_mixed",
-        "items": all_items,
-    }
     with open("rss_sources.json", "w", encoding="utf-8") as f:
-        json.dump(output, f, ensure_ascii=False, indent=2)
-    print(f"已保存到 rss_sources.json")
+        json.dump({"items": all_items}, f, ensure_ascii=False, indent=2)
