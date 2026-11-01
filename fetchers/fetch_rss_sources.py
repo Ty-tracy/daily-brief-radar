@@ -1,5 +1,5 @@
 """
-抓取多个RSS信息源（TechCrunch AI / The Verge AI / Ben's Bites / 少数派）
+抓取多个RSS信息源（宏观政策 / 经济数据 / 发改动态 / 前沿科技）
 用 feedparser 这个专门解析RSS的工具库，比自己写XML解析省事很多
 
 运行前需要先装：pip install feedparser
@@ -10,12 +10,28 @@ import json
 
 # 信息源清单：名字 + RSS地址
 RSS_SOURCES = {
-    "TechCrunch AI": "https://techcrunch.com/category/artificial-intelligence/feed/",
-    "The Verge AI": "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml",
-    "Ben's Bites": "https://www.bensbites.co/feed",
-    "少数派": "https://sspai.com/feed",
+    # ==========================================
+    # 核心宏观与政策（原生稳定源）
+    # ==========================================
+    "国家统计局": "http://www.stats.gov.cn/tjsj/zxfb/rss.xml",
+    "财新网-要闻": "https://gateway.caixin.com/api/data/global/feedlyRss.xml",
+    
+    # ==========================================
+    # 发改与专项债（Google News 聚合，防止官网反爬失效）
+    # ==========================================
+    "发改委最新政策": "https://news.google.com/rss/search?q=site:ndrc.gov.cn+when:7d&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
+    "专项债与国债动态": "https://news.google.com/rss/search?q=专项债+OR+超长期特别国债+when:7d&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
+    
+    # ==========================================
+    # 科技前沿与产业（AI4S / 低空 / 北斗）
+    # ==========================================
+    "前沿科技风向": "https://news.google.com/rss/search?q=AI4S+OR+低空经济+OR+北斗+when:7d&hl=zh-CN&gl=CN&ceid=CN:zh-Hans",
+    
+    # ==========================================
+    # 补充一点商业科技视点
+    # ==========================================
+    "36氪": "https://36kr.com/feed",
 }
-
 
 def fetch_rss(name, url, max_items=8):
     """抓取单个RSS源，返回最新几条"""
