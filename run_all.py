@@ -1,5 +1,5 @@
 """
-一键运行：依次执行抓取 → AI摘要 → 发送简报微信（强制日志增强版）
+一键运行：依次执行抓取 → AI摘要 → 发送简报微信
 """
 import subprocess
 import sys
@@ -10,9 +10,9 @@ from datetime import datetime
 MAX_RETRIES = 3
 RETRY_WAIT_SECONDS = 5 # 测试期间缩短重试等待时间
 
+# 👇 已经删掉了“抓取教务网通知”，如果你以后想加别的，可以在这里加
 FETCH_STEPS = [
     ("抓取 GitHub Trending", "fetchers/fetch_github_trending.py"),
-    ("抓取教务网通知", "fetchers/fetch_jwc_news.py"),
     ("抓取 Hacker News", "fetchers/fetch_hacker_news.py"),
     ("抓取科技/AI媒体RSS", "fetchers/fetch_rss_sources.py"),
     ("抓取经济/政治/科学突破新闻", "fetchers/fetch_category_news.py"),
@@ -43,17 +43,14 @@ def run_step_with_retry(step_name, script, extra_args):
         print(f"执行命令：{sys.executable} {script} {' '.join(extra_args)}")
         print('='*40)
         
-        # 【核心修改】强制捕获子进程的输出和报错，不让他偷偷溜走
         result = subprocess.run(
             [sys.executable, script] + extra_args,
             capture_output=True,
             text=True
         )
         
-        # 打印脚本里的正常输出
         if result.stdout:
             print(result.stdout)
-        # 打印脚本里的报错信息
         if result.stderr:
             print(f"❌ 错误输出: {result.stderr}")
 
