@@ -1,48 +1,62 @@
 """
-抓取指定信息源（大容量版）
+抓取指定信息源（国内真实链接版）
+使用带 User-Agent 的镜像节点，绕过反爬，拿真实原文链接
 """
 import feedparser
 from datetime import datetime
 import json
-import urllib.parse
+import urllib.request
+
+# 伪装成浏览器，防止被国内网站直接拦截
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 RSS_SOURCES = {
-    "发改委与国务院": "site:ndrc.gov.cn OR site:gov.cn 政策 OR 资金",
-    "财政与专项债": "专项债 OR 超长期特别国债 OR 中央预算内投资",
-    "宏观经济数据": "国家统计局 OR 宏观经济数据 OR CPI OR PPI",
-    "新质生产力": "新质生产力 OR 低空经济 OR 算力网 OR 卫星互联网",
-    "AI与前沿科技": "AI4S OR 大模型 OR 人工智能应用",
-    "地方经济动态": "湖北经济 OR 宜昌经济 OR 地方专项债",
+    # 官方直连
+    "国家统计局": "http://www.stats.gov.cn/tjsj/zxfb/rss.xml",
+    "财新网": "https://gateway.caixin.com/api/data/global/feedlyRss.xml",
+    "36氪": "https://36kr.com/feed",
+    
+    # 发改委与国务院（使用 RSSHub 镜像，如果这个镜像挂了，可以换成 rsshub.app）
+    "发改委最新政策": "https://rsshub.rssforever.com/gov/ndrc/zcfb",
+    "国务院最新政策": "https://rsshub.rssforever.com/gov/zhengce/zuixin",
+    "财政部动态": "https://rsshub.rssforever.com/gov/mof/gzdt"
 }
 
-def fetch_rss(name, query, max_items=10):  # 增加每次抓取的数量
-    encoded_query = urllib.parse.quote(f"{query} when:7d")
-    url = f"https://news.google.com/rss/search?q={encoded_query}&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"
-    
-    feed = feedparser.parse(url)
+def fetch_rss(name, url, max_items=5):
+    try:
+        # 核心修复：手动带上 User-Agent 请求数据
+        req = urllib.request.Request(url, headers={'User-Agent': USER_AGENT})
+        with urllib.request.urlopen(req, timeout=15) as response:
+            content = response.read()
+            
+        feed = feedparser.parse(content)
 
-    if feed.bozo and not feed.entries:
-        print(f"⚠️ {name} 抓取可能有问题，跳过")
+        if feed.bozo and not feed.entries:
+            print(f"⚠️ {name} 抓取可能有问题，跳过")
+            return []
+
+        results = []
+        for entry in feed.entries[:max_items]:
+            results.append({
+                "source": name,
+                "title": entry.get("title", ""),
+                "url": entry.get("link", ""), # 这里的链接就是真实的国内官网链接了
+                "published": entry.get("published", entry.get("updated", "")),
+            })
+        return results
+    except Exception as e:
+        print(f"❌ {name} 抓取失败: {e}")
         return []
-
-    results = []
-    for entry in feed.entries[:max_items]:
-        results.append({
-            "source": name,
-            "title": entry.get("title", ""),
-            "url": entry.get("link", ""),
-            "published": entry.get("published", entry.get("updated", "")),
-        })
-    return results
 
 if __name__ == "__main__":
     all_items = []
-    for name, query in RSS_SOURCES.items():
+    for name, url in RSS_SOURCES.items():
         print(f"正在抓取 {name} ...")
-        items = fetch_rss(name, query)
+        items = fetch_rss(name, url)
         print(f"  → 抓到 {len(items)} 条")
         all_items.extend(items)
 
     print(f"\n总共抓取到 {len(all_items)} 条")
     with open("rss_sources.json", "w", encoding="utf-8") as f:
         json.dump({"items": all_items}, f, ensure_ascii=False, indent=2)
+    print(f"已保存到 rss_sources.json")
