@@ -1,70 +1,60 @@
 """
-抓取经济 / 政治 / 科学突破类别新闻（阶段一修订版）
-
-【本次改动】
-之前经济/政治都用BBC的源，内容偏国际、跟"中国经济趋势""国内时政"关系不大。
-这次改成：
-- 经济拆两个子类：中国经济（中新网财经RSS）+ 世界经济（BBC Business）
-- 政治拆两个子类：国内时政（中新网时政RSS）+ 国际时政（BBC World）
-- 科学突破维持BBC科学环境RSS，不拆分（后面summarize.py那边只挑2条）
-
-运行前需要先装：pip install feedparser
+抓取分类新闻（经济 / 政治 / 科学前沿）
+基于 Google News RSS 进行关键词聚合，比直接爬网页更稳定
 """
 import feedparser
 from datetime import datetime
 import json
 
-# 结构：大类 -> { 子类名: RSS地址 }
-CATEGORY_SOURCES = {
-    "经济": {
-        "中国经济": "https://www.chinanews.com.cn/rss/finance.xml",
-        "世界经济": "http://feeds.bbci.co.uk/news/business/rss.xml",
-    },
-    "政治": {
-        "国内时政": "https://www.chinanews.com.cn/rss/china.xml",
-        "国际时政": "http://feeds.bbci.co.uk/news/world/rss.xml",
-    },
-    "科学突破": {
-        "科学突破": "http://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
-    },
+# 针对你的需求定制的关键词
+CATEGORIES = {
+    "economy": [
+        "宏观经济", "中央预算内投资", "地方政府专项债", "超长期特别国债", "新型政策性金融工具"
+    ],
+    "politics": [
+        "国家发改委", "宏观政策", "国务院常务会议", "六张网", "基础设施投资"
+    ],
+    "science": [
+        "AI4S", "低空经济", "北斗应用", "人工智能大模型"
+    ]
 }
 
-
-def fetch_one(category, subcategory, url, max_items=10):
-    """抓取单个子类的RSS。max_items留得比展示条数多一些，方便后面AI筛选时有得挑"""
-    feed = feedparser.parse(url)
-
-    if feed.bozo and not feed.entries:
-        print(f"⚠️ 【{category}-{subcategory}】抓取可能有问题，跳过（{url}）")
-        return []
-
+def fetch_category_news(category_keywords, max_items=5):
+    """按关键词搜索新闻"""
     results = []
+    
+    # 把关键词组合成 Google News 搜索语法 (OR 连接)
+    query = "+OR+".join(category_keywords)
+    # 限定过去 7 天内的中文新闻
+    url = f"https://news.google.com/rss/search?q={query}+when:7d&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"
+    
+    feed = feedparser.parse(url)
+    
+    if feed.bozo and not feed.entries:
+        print(f"⚠️ 抓取分类 {category_keywords[0]} 失败")
+        return []
+        
     for entry in feed.entries[:max_items]:
         results.append({
-            "category": category,
-            "subcategory": subcategory,
+            "source": "综合新闻",
             "title": entry.get("title", ""),
             "url": entry.get("link", ""),
             "published": entry.get("published", entry.get("updated", "")),
+            "tags": category_keywords[0] # 打上标签
         })
     return results
 
-
 if __name__ == "__main__":
     all_items = []
+    
+    for category, keywords in CATEGORIES.items():
+        print(f"正在检索分类：{category} ...")
+        items = fetch_category_news(keywords)
+        print(f"  → 抓到 {len(items)} 条")
+        all_items.extend(items)
 
-    for category, subs in CATEGORY_SOURCES.items():
-        for subcategory, url in subs.items():
-            print(f"正在抓取【{category}-{subcategory}】...")
-            items = fetch_one(category, subcategory, url)
-            print(f"  → 抓到 {len(items)} 条")
-            all_items.extend(items)
-
-    print(f"\n总共抓取到 {len(all_items)} 条")
-    for i, item in enumerate(all_items, 1):
-        print(f"{i}. [{item['category']}-{item['subcategory']}] {item['title']}")
-        print(f"   {item['url']}\n")
-
+    print(f"\n总共抓取到 {len(all_items)} 条分类新闻")
+    
     output = {
         "fetched_at": datetime.now().isoformat(),
         "source": "category_news",
@@ -72,5 +62,5 @@ if __name__ == "__main__":
     }
     with open("category_news.json", "w", encoding="utf-8") as f:
         json.dump(output, f, ensure_ascii=False, indent=2)
-
-    print(f"已保存到 category_news.json（共 {len(all_items)} 条）")
+    
+    print(f"已保存到 category_news.json")
