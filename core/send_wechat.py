@@ -1,6 +1,5 @@
 """
-把 daily_brief.md 解析成结构化数据，生成精致的 HTML 卡片推送出去
-（已修改为通过 PushPlus 推送到微信）
+把 daily_brief.md 解析成结构化数据，生成精致的 HTML 卡片通过 PushPlus 推送到微信
 """
 import os
 import re
@@ -9,9 +8,17 @@ import urllib.parse
 import requests
 import time
 
-import seen_records
+# 尝试导入 seen_records 用于早晚报去重
+try:
+    import seen_records
+except ImportError:
+    import sys
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    try:
+        import seen_records
+    except ImportError:
+        seen_records = None
 
-# 从环境变量读取 PushPlus 的 Token
 PUSHPLUS_TOKEN = os.environ.get("PUSHPLUS_TOKEN", "")
 
 COLOR_DARK = "#2c3e50"
@@ -28,7 +35,6 @@ EXTRA_SECTIONS = [
 
 _LEADING_MARKER_RE = re.compile(r"^[\s\-\*•·]*(\d+[\.\、\)]\s+)?")
 
-
 def _split_line(line, min_parts):
     line = _LEADING_MARKER_RE.sub("", line).strip()
     if "|||" not in line:
@@ -38,19 +44,17 @@ def _split_line(line, min_parts):
         parts += [""] * (min_parts - len(parts))
     return parts
 
-
 def _safe_href(url):
-    """将原始 URL 安全地放入 HTML href 属性，避免客户端截断链接。"""
     url = (url or "").strip().strip("<>\"'")
     decoded = urllib.parse.unquote(url)
     if "|||" in decoded:
         url = decoded.split("|||", 1)[0].strip()
     return html_lib.escape(url, quote=True)
 
-
 def parse_brief(content):
     date = ""
     slot = "morning"
+    # 保留了 jwc 的 key，是为了防止旧文件里有残留导致报错，但后续排版已彻底剔除
     keys = ["overview", "jwc", "top_picks", "tech", "economy", "politics", "science", "action", "greeting"]
     sections = {k: "" for k in keys}
     current = None
@@ -66,20 +70,17 @@ def parse_brief(content):
     return date, slot, sections
 
 def collect_seen_items(sections):
-    """把展示的新闻（标题+链接）收集起来，供当天晚上去重用"""
     seen = []
     seen_urls = set()
-    for key in ("jwc", "top_picks", "tech", "economy", "politics", "science"):
+    for key in ("top_picks", "tech", "economy", "politics", "science"):
         for raw_line in sections.get(key, "").split("\n"):
             parts = _split_line(raw_line, 3)
-            if not parts:
-                continue
-            title, url = (parts[0], parts[1]) if key == "jwc" else (parts[1], parts[2])
+            if not parts: continue
+            title, url = parts[1], parts[2]
             if title and url and url not in seen_urls:
                 seen_urls.add(url)
                 seen.append({"title": title, "url": url})
     return seen
-
 
 def render_overview(text):
     one_liner, ai_view, trend, todo = "", "", "", ""
@@ -105,39 +106,6 @@ def render_overview(text):
     </div>'''
     return html, todo
 
-
-def render_jwc_cards(text):
-    html = ""
-    mode = None
-    for raw_line in text.split("\n"):
-        line = raw_line.strip()
-        if not line: continue
-        if "需要行动" in line:
-            mode = "action"
-            html += f'<div style="font-size:15px; color:{COLOR_ACCENT}; font-weight:bold; margin:16px 0 10px;">● 需要行动</div>'
-            continue
-        if "仅需" in line:
-            mode = "info"
-            html += f'<div style="font-size:15px; color:{COLOR_MUTED}; font-weight:bold; margin:16px 0 10px;">○ 仅需了解</div>'
-            continue
-        parts = _split_line(line, 3)
-        if not parts: continue
-        title, url, desc = parts[0], parts[1], parts[2]
-        if not title: continue
-        title_html = f'<a href="{_safe_href(url)}" style="color:inherit; text-decoration:none; border-bottom:1px dotted currentColor;">{html_lib.escape(title)}</a>' if url else html_lib.escape(title)
-        if mode == "action":
-            html += f'''<div style="background:{COLOR_BG_ACCENT}; border-left:3px solid {COLOR_ACCENT}; border-radius:4px; padding:14px 18px; margin-bottom:10px;">
-                <div style="font-size:17px; font-weight:600; color:#222;">{title_html}</div>
-                <div style="font-size:15px; color:#555; margin-top:6px; line-height:1.5;">{desc}</div>
-            </div>'''
-        else:
-            html += f'''<div style="background:{COLOR_BG_MUTED}; border-radius:4px; padding:14px 18px; margin-bottom:10px;">
-                <div style="font-size:16px; color:#444;">{title_html}</div>
-                <div style="font-size:14px; color:#999; margin-top:6px; line-height:1.5;">{desc}</div>
-            </div>'''
-    return html
-
-
 def render_top_picks(text):
     html = ""
     for raw_line in text.split("\n"):
@@ -157,7 +125,6 @@ def render_top_picks(text):
             <div style="font-size:14.5px; color:#333; margin-top:8px; line-height:1.6; background:{COLOR_BG_ACCENT}; padding:8px 10px; border-radius:4px;"><b style="color:{COLOR_ACCENT};">对你的意义：</b>{meaning}</div>
         </div>'''
     return html
-
 
 def render_content_cards(text):
     html = ""
@@ -185,7 +152,6 @@ def render_content_cards(text):
             <div style="font-size:13.5px; color:#888; margin-top:8px; line-height:1.6;">💬 {comment}</div>
         </div>'''
     return html
-
 
 def render_action_advice(text):
     directions, not_worth, recommend = [], "", ""
@@ -229,7 +195,6 @@ def render_action_advice(text):
         {recommend_html}
     </div>'''
 
-
 def render_greeting(text):
     opening, closing = "", ""
     mode = None
@@ -242,10 +207,8 @@ def render_greeting(text):
         elif mode == "closing": closing += line
     return opening, closing
 
-
 def build_html(date, slot, sections):
     overview_html, todo = render_overview(sections["overview"])
-    jwc_html = render_jwc_cards(sections["jwc"])
     top_picks_html = render_top_picks(sections["top_picks"])
     tech_html = render_content_cards(sections["tech"])
 
@@ -262,41 +225,33 @@ def build_html(date, slot, sections):
     opening_html = f'''<div style="font-size:15px; color:{COLOR_DARK}; background:{COLOR_BG_ACCENT}; border-radius:8px; padding:14px 18px; margin-bottom:16px; line-height:1.6;">{slot_label}👋 {opening}</div>''' if opening else ""
     closing_in_footer = f'''<div style="font-size:15px; font-weight:600; color:{COLOR_DARK}; margin-top:12px; border-top:1px solid rgba(63,107,143,0.25); padding-top:12px; line-height:1.6;">💌 {closing}</div>''' if closing else ""
 
-    tab_bar = f'''
-    <div style="display:table; width:100%; margin-bottom:18px; border-bottom:2px solid #eee;">
-        <div style="display:table-cell; width:50%; text-align:center; padding:12px 0; background:{COLOR_DARK}; color:#fff; font-size:16px; font-weight:600; border-radius:6px 0 0 0;">🏫 学校教务</div>
-        <div style="display:table-cell; width:50%; text-align:center; padding:12px 0; background:{COLOR_ACCENT}; color:#fff; font-size:16px; font-weight:600; border-radius:0 6px 0 0;">💻 科技资讯</div>
-    </div>
-    '''
-
     footer = f'''<div style="background:{COLOR_BG_ACCENT}; border-radius:8px; padding:18px 22px; margin-top:30px; text-align:center;">
         <div style="font-size:14px; color:{COLOR_MUTED};">今日最该做的一件事</div>
         <div style="font-size:17px; font-weight:600; color:{COLOR_DARK}; margin-top:6px;">✅ {todo}</div>
         {closing_in_footer}
     </div>'''
 
+    # 👇 这里彻底删除了原先的“学校教务”排版和双色标签栏
     return f"""
     <div style="max-width:620px; margin:0 auto; font-family:-apple-system,'PingFang SC',sans-serif;">
         <h1 style="font-size:23px; color:{COLOR_DARK}; margin-bottom:6px;">📋 每日简报</h1>
         <div style="font-size:15px; color:{COLOR_MUTED}; margin-bottom:18px;">{date}</div>
         {opening_html}
         {overview_html}
-        {tab_bar}
-        <h2 style="font-size:18px; color:{COLOR_DARK}; margin-top:8px;">学校教务</h2>
-        {jwc_html}
+        
         <h2 style="font-size:18px; color:{COLOR_DARK}; margin-top:26px;">🏆 各榜单头名</h2>
         {top_picks_html}
+        
         <h2 style="font-size:18px; color:{COLOR_DARK}; margin-top:26px;">科技资讯全览</h2>
         {tech_html}
+        
         {extra_sections_html}
         {action_html}
         {footer}
     </div>
     """
 
-
 def send_brief_wechat():
-    """已修改：使用 PushPlus 发送到微信"""
     if not PUSHPLUS_TOKEN:
         print("❌ 错误: 未找到 PUSHPLUS_TOKEN 环境变量，请检查 GitHub Secrets")
         return
@@ -305,7 +260,7 @@ def send_brief_wechat():
         with open("daily_brief.md", "r", encoding="utf-8") as f:
             content = f.read()
     except FileNotFoundError:
-        print("⚠️ 没找到 daily_brief.md，先跑 run_all.py 生成简报")
+        print("⚠️ 没找到 daily_brief.md，请检查抓取和摘要步骤是否成功")
         return
 
     date, slot, sections = parse_brief(content)
@@ -319,7 +274,7 @@ def send_brief_wechat():
         "token": PUSHPLUS_TOKEN,
         "title": title,
         "content": html_content,
-        "template": "html" # 使用 HTML 模板保留精美排版
+        "template": "html"
     }
 
     max_retries = 3
@@ -329,13 +284,14 @@ def send_brief_wechat():
             print(f"📡 正在通过 PushPlus 推送到微信 (第{attempt}次尝试)...")
             res = requests.post(url, json=payload, timeout=15)
             
-            # PushPlus 成功返回 200 且包含 "code":200
             if res.status_code == 200 and '"code":200' in res.text:
                 print(f"✅ 简报已成功推送到微信！")
-                # 早报发送成功后，记录已看新闻，供晚报去重
-                if slot == "morning":
-                    seen_items = collect_seen_items(sections)
-                    seen_records.record_today(date, seen_items)
+                if slot == "morning" and seen_records:
+                    try:
+                        seen_items = collect_seen_items(sections)
+                        seen_records.record_today(date, seen_items)
+                    except Exception as e:
+                        print(f"⚠️ 记录去重数据失败: {e}")
                 return
             else:
                 last_error = res.text
@@ -349,7 +305,5 @@ def send_brief_wechat():
 
     print(f"❌ 推送彻底失败（已重试{max_retries}次）：{last_error}")
 
-
 if __name__ == "__main__":
-    # 兼容原来的函数名，以防其他地方调用了它
     send_brief_wechat()
